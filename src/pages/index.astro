@@ -1,0 +1,186 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const { cuan_db } = Astro.locals.runtime.env;
+
+const { results } = await cuan_db.prepare("SELECT * FROM products ORDER BY created_at DESC").all();
+const products = results as Array<{
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  affiliate_url: string;
+  image_url: string | null;
+  category: string | null;
+  click_count: number;
+}>;
+---
+
+<Layout title="Cuan.ninja | Kurasi Produk Digital">
+  <main class="min-h-screen bg-bg-primary text-text-primary p-6 md:p-12">
+    <!-- Header -->
+    <header class="max-w-7xl mx-auto mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div>
+        <h1 class="text-3xl md:text-4xl font-bold tracking-tight">
+          Cuan<span class="text-accent">.ninja</span>
+        </h1>
+        <p class="text-text-secondary mt-1 text-sm md:text-base">
+          Kurasi produk digital terpilih untuk developer & kreator.
+        </p>
+      </div>
+      <div class="w-full md:w-80">
+        <input 
+          type="text" 
+          id="search-input"
+          placeholder="Cari template, boilerplate, course..." 
+          class="input-base"
+        />
+      </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <div class="max-w-7xl mx-auto mb-8 flex flex-wrap gap-4 text-sm text-text-secondary">
+      <span>{products.length} Produk Tersedia</span>
+      <span>·</span>
+      <span id="filtered-count" class="text-accent font-medium">{products.length} ditampilkan</span>
+    </div>
+
+    <!-- Category Filter -->
+    <div class="max-w-7xl mx-auto mb-8 flex flex-wrap gap-2" role="group" aria-label="Kategori produk">
+      <button 
+        class="filter-btn badge bg-accent/20 text-accent border-accent/50"
+        data-category="all"
+      >
+        Semua
+      </button>
+      {Array.from(new Set(products.map(p => p.category).filter(Boolean))).map(cat => (
+        <button 
+          class="filter-btn badge"
+          data-category={cat}
+        >
+          {cat}
+        </button>
+      ))}
+    </div>
+
+    <!-- Product Grid -->
+    <div class="max-w-7xl mx-auto">
+      <div 
+        id="product-grid"
+        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+      >
+        {products.map((product) => (
+          <article 
+            class="card group"
+            data-category={product.category || ''}
+            data-name={product.name.toLowerCase()}
+          >
+            {product.image_url && (
+              <div class="aspect-video overflow-hidden relative">
+                <img 
+                  src={product.image_url} 
+                  alt={product.name}
+                  class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            <div class="p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="font-semibold text-lg line-clamp-1">{product.name}</h3>
+                {product.category && (
+                  <span class="badge ml-2 shrink-0">{product.category}</span>
+                )}
+              </div>
+              <p class="text-text-secondary text-sm line-clamp-2">
+                {product.description || 'Tidak ada deskripsi.'}
+              </p>
+              <div class="flex items-center justify-between pt-2 border-t border-border">
+                <span class="text-sm text-text-secondary">
+                  {product.click_count} klik
+                </span>
+                <a 
+                  href={`/go/${product.slug}`}
+                  class="btn-primary text-sm px-4 py-2"
+                >
+                  Lihat Produk
+                </a>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <!-- Empty State -->
+      <div 
+        id="empty-state" 
+        class="hidden text-center py-16"
+      >
+        <svg class="mx-auto h-12 w-12 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <h3 class="mt-4 text-lg font-medium">Tidak ada produk ditemukan</h3>
+        <p class="mt-1 text-text-secondary">Coba ubah pencarian atau filter kategori.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Client-side filtering script -->
+  <script is:inline>
+    const searchInput = document.getElementById('search-input');
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    const productCards = document.querySelectorAll('[data-category]');
+    const grid = document.getElementById('product-grid');
+    const emptyState = document.getElementById('empty-state');
+    const filteredCount = document.getElementById('filtered-count');
+
+    let activeCategory = 'all';
+    let searchQuery = '';
+
+    function filterProducts() {
+      let visibleCount = 0;
+      
+      productCards.forEach(card => {
+        const name = card.dataset.name || '';
+        const category = card.dataset.category || '';
+        
+        const matchesSearch = name.includes(searchQuery);
+        const matchesCategory = activeCategory === 'all' || category === activeCategory;
+        
+        if (matchesSearch && matchesCategory) {
+          card.classList.remove('hidden');
+          visibleCount++;
+        } else {
+          card.classList.add('hidden');
+        }
+      });
+      
+      filteredCount.textContent = visibleCount;
+      
+      if (visibleCount === 0) {
+        grid.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+      } else {
+        grid.classList.remove('hidden');
+        emptyState.classList.add('hidden');
+      }
+    }
+
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value.toLowerCase().trim();
+      filterProducts();
+    });
+
+    filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterButtons.forEach(b => b.classList.remove('bg-accent/20', 'text-accent', 'border-accent/50'));
+        btn.classList.add('bg-accent/20', 'text-accent', 'border-accent/50');
+        activeCategory = btn.dataset.category || 'all';
+        filterProducts();
+      });
+    });
+
+    // Initialize
+    filterProducts();
+  </script>
+</Layout>
