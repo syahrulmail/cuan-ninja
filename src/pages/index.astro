@@ -1,9 +1,13 @@
 ---
 import Layout from '../layouts/Layout.astro';
 
-const { cuan_db } = Astro.locals.runtime.env;
+const cuan_db = Astro.locals.runtime?.env?.cuan_db;
 
-const { results } = await cuan_db.prepare("SELECT * FROM products ORDER BY created_at DESC").all();
+if (!cuan_db) {
+  return new Response("D1 Binding 'cuan_db' tidak ditemukan! Silakan cek Dashboard Cloudflare -> Settings -> Functions.", { status: 500 });
+}
+
+const { results } = await cuan_db.prepare("SELECT * FROM products ORDER BY id DESC").all();
 const products = results as Array<{
   id: string;
   slug: string;

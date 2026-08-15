@@ -26,3 +26,14 @@ interface D1Result<T> {
     rows_written: number;
   };
 }
+
+// Extend Astro locals to include Cloudflare bindings
+declare namespace App {
+  interface Locals {
+    runtime: {
+      env: {
+        cuan_db: D1Database;
+      };
+    };
+  }
+}
