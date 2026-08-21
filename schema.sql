@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS products (
     affiliate_url TEXT NOT NULL,
     image_url TEXT,
     category TEXT,
+    video_url TEXT,
+    images TEXT,
     click_count INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

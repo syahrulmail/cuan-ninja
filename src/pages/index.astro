@@ -23,6 +23,8 @@ const products = results as Array<{
   affiliate_url: string;
   image_url: string | null;
   category: string | null;
+  video_url: string | null;
+  images: string | null;
   click_count: number;
 }>;
 
@@ -43,9 +45,24 @@ function parseLabels(raw: string | null): string[] {
     .filter(Boolean);
 }
 
+function parseImages(raw: string | null): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 const labeledProducts = products.map((product) => ({
   ...product,
-  labels: parseLabels(product.category)
+  labels: parseLabels(product.category),
+  imageList: parseImages(product.images)
 }));
 
 const allLabels = [...new Set(labeledProducts.flatMap((p) => p.labels))].sort((a, b) =>
@@ -53,6 +70,19 @@ const allLabels = [...new Set(labeledProducts.flatMap((p) => p.labels))].sort((a
 );
 
 const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
+
+const modalProducts = labeledProducts.map((p) => ({
+  slug: p.slug,
+  name: p.name,
+  description: p.description || '',
+  video: p.video_url || '',
+  images: p.imageList,
+  image: p.image_url || '',
+  affiliate: p.affiliate_url,
+  labels: p.labels,
+  clicks: p.click_count
+}));
+const modalDataJson = JSON.stringify(modalProducts).replace(/</g, '\\u003c');
 ---
 
 <Layout title="Cuan.ninja | Kurasi Produk Digital">
@@ -184,7 +214,8 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
         <div id="product-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {labeledProducts.map((product, index) => (
             <article
-              class="card card-hover group flex flex-col"
+              class="card card-hover group flex flex-col cursor-pointer product-open"
+              data-slug={product.slug}
               data-labels={JSON.stringify(product.labels)}
               data-name={product.name.toLowerCase()}
               style={`--reveal-delay:${(index % 4) * 70}ms`}
@@ -205,6 +236,12 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
                     </div>
                   )}
                   <div class="absolute inset-0 bg-gradient-to-t from-bg-card/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                  <span class="absolute bottom-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/90 text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Detail
+                  </span>
                 </div>
               )}
               <div class="p-5 flex flex-col flex-1 gap-3">
@@ -222,23 +259,22 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
                   </div>
                 )}
                 <div class="flex items-center justify-between pt-4 mt-auto border-t border-border">
-                  <span class="inline-flex items-center gap-1.5 text-xs text-text-secondary">
+                  <span class="product-clicks inline-flex items-center gap-1.5 text-xs text-text-secondary">
                     <svg class="h-3.5 w-3.5 text-gold" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
                     {product.click_count} klik
                   </span>
-                  <a
-                    href={`/go/${product.slug}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     class="btn-primary !px-4 !py-2 !text-xs"
+                    data-slug={product.slug}
                   >
                     Lihat Produk
                     <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6v6m-9 3l9-9" />
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                     </svg>
-                  </a>
+                  </button>
                 </div>
               </div>
             </article>
@@ -271,7 +307,7 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
             </div>
             <h3 class="font-display font-bold text-lg mb-2">Pilih Produk</h3>
             <p class="text-sm text-text-secondary leading-relaxed">
-              Jelajahi katalog dan pilih produk digital yang paling sesuai kebutuhanmu.
+              Klik kartu produk untuk lihat detail, video, dan galeri sebelum memutuskan.
             </p>
           </div>
           <div class="card card-hover p-8 text-center reveal" style="--reveal-delay:120ms">
@@ -316,9 +352,88 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
       </div>
     </footer>
   </div>
+
+  <!-- Product Detail Modal -->
+  <div
+    id="product-modal"
+    class="hidden fixed inset-0 z-50 items-center justify-center p-4 sm:p-6 product-modal-backdrop"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="product-modal-title"
+  >
+    <div
+      id="product-modal-panel"
+      class="product-modal-panel relative w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-bg-surface border border-border rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+    >
+      <button
+        type="button"
+        id="modal-close"
+        aria-label="Tutup"
+        class="absolute top-3 right-3 z-20 h-9 w-9 grid place-items-center rounded-full bg-black/60 text-white/90 hover:bg-black/80 transition-colors"
+      >
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
+      <!-- Slideshow -->
+      <div class="relative bg-black">
+        <div id="product-slideshow" class="relative aspect-video w-full overflow-hidden"></div>
+
+        <button
+          type="button"
+          id="slide-prev"
+          aria-label="Slide sebelumnya"
+          class="absolute left-3 top-1/2 -translate-y-1/2 hidden h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+        >
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          id="slide-next"
+          aria-label="Slide berikutnya"
+          class="absolute right-3 top-1/2 -translate-y-1/2 hidden h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+        >
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+          <span id="slide-counter" class="hidden px-2 py-1 rounded-md bg-black/60 text-white/90 text-xs font-medium backdrop-blur-sm"></span>
+        </div>
+        <div id="slide-dots" class="absolute bottom-3 right-3 hidden items-center gap-1.5"></div>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 sm:p-6">
+        <h2 id="product-modal-title" class="font-display text-lg sm:text-xl font-bold leading-snug"></h2>
+        <div id="product-modal-badges" class="flex flex-wrap gap-1.5 mt-2"></div>
+        <p id="product-modal-desc" class="mt-4 text-text-secondary text-sm leading-relaxed"></p>
+        <a
+          id="product-modal-link"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn-primary mt-6 w-full sm:w-auto !py-3"
+        >
+          Lihat Halaman Lengkap
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6v6m-9 3l9-9" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" id="products-modal-data" set:html={modalDataJson}></script>
 </Layout>
 
 <script>
+  import Plyr from 'plyr';
+
   const stickySearch = document.getElementById('sticky-search');
   const stickyClear = document.getElementById('sticky-clear');
   const stickyCount = document.getElementById('sticky-count');
@@ -428,6 +543,250 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
     }
   });
 
+  /* ---------------- Product Detail Modal ---------------- */
+
+  const modal = document.getElementById('product-modal');
+  const modalPanel = document.getElementById('product-modal-panel');
+  const modalClose = document.getElementById('modal-close');
+  const slideshow = document.getElementById('product-slideshow');
+  const modalTitle = document.getElementById('product-modal-title');
+  const modalBadges = document.getElementById('product-modal-badges');
+  const modalDesc = document.getElementById('product-modal-desc');
+  const modalLink = document.getElementById('product-modal-link');
+  const slidePrev = document.getElementById('slide-prev');
+  const slideNext = document.getElementById('slide-next');
+  const slideCounter = document.getElementById('slide-counter');
+  const slideDots = document.getElementById('slide-dots');
+
+  const modalProducts = JSON.parse(
+    document.getElementById('products-modal-data').textContent
+  );
+
+  let plyr = null;
+  let plyrInited = false;
+  let currentSlides = [];
+  let currentSlideIndex = 0;
+  let activeSlug = null;
+
+  function getYoutubeId(url) {
+    if (!url) return '';
+    const m = String(url).match(
+      /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([\w-]{11})/
+    );
+    return m ? m[1] : '';
+  }
+
+  function buildSlides(product) {
+    const slides = [];
+    const vid = getYoutubeId(product.video);
+    if (vid) slides.push({ type: 'video', videoId: vid });
+    const imgs =
+      product.images && product.images.length
+        ? product.images
+        : product.image
+          ? [product.image]
+          : [];
+    imgs.forEach((url) => slides.push({ type: 'image', url }));
+    return slides;
+  }
+
+  function destroyPlyr() {
+    if (plyr) {
+      try {
+        plyr.destroy();
+      } catch (e) {
+        /* noop */
+      }
+      plyr = null;
+    }
+    plyrInited = false;
+  }
+
+  function ensurePlyr() {
+    const el = document.getElementById('product-video-embed');
+    if (!el || plyrInited) return;
+    plyrInited = true;
+    plyr = new Plyr(el, {
+      controls: [
+        'play',
+        'progress',
+        'current-time',
+        'duration',
+        'mute',
+        'volume',
+        'settings',
+        'fullscreen'
+      ],
+      clickToPlay: true,
+      youtube: { noCookie: true, rel: 0, showinfo: 0, modestbranding: 1 }
+    });
+  }
+
+  function pauseVideo() {
+    if (plyr && typeof plyr.pause === 'function') {
+      try {
+        plyr.pause();
+      } catch (e) {
+        /* noop */
+      }
+    }
+  }
+
+  function renderSlides(product) {
+    const slides = buildSlides(product);
+    currentSlides = slides;
+    currentSlideIndex = 0;
+
+    slideshow.innerHTML = slides
+      .map((slide, i) => {
+        if (slide.type === 'video') {
+          return `
+            <div class="product-slide ${i === 0 ? 'is-active' : ''}" data-index="${i}" data-type="video">
+              <div id="product-video-embed" class="plyr__video-embed w-full h-full" data-plyr-provider="youtube" data-plyr-embed-id="${slide.videoId}"></div>
+            </div>`;
+        }
+        return `
+            <div class="product-slide ${i === 0 ? 'is-active' : ''}" data-index="${i}" data-type="image">
+              <img src="${slide.url}" alt="" class="w-full h-full object-cover" loading="lazy" />
+            </div>`;
+      })
+      .join('');
+
+    const hasMultiple = slides.length > 1;
+    slidePrev.classList.toggle('hidden', !hasMultiple);
+    slideNext.classList.toggle('hidden', !hasMultiple);
+    slideCounter.classList.toggle('hidden', !hasMultiple);
+    slideDots.classList.toggle('hidden', !hasMultiple);
+
+    slideDots.innerHTML = slides
+      .map(
+        (_, i) =>
+          `<button type="button" class="slide-dot ${i === 0 ? 'is-active' : ''}" data-index="${i}" aria-label="Ke slide ${i + 1}"></button>`
+      )
+      .join('');
+
+    if (slides.length > 0) {
+      updateSlideUI();
+    }
+  }
+
+  function updateSlideUI() {
+    const total = currentSlides.length;
+    slideCounter.textContent = `${currentSlideIndex + 1}/${total}`;
+
+    slideshow
+      .querySelectorAll('.product-slide')
+      .forEach((el, i) => el.classList.toggle('is-active', i === currentSlideIndex));
+    slideDots
+      .querySelectorAll('.slide-dot')
+      .forEach((el, i) => el.classList.toggle('is-active', i === currentSlideIndex));
+
+    const type = currentSlides[currentSlideIndex]?.type;
+    if (type === 'video') {
+      ensurePlyr();
+    } else {
+      pauseVideo();
+    }
+  }
+
+  function goToSlide(index) {
+    if (!currentSlides.length) return;
+    const total = currentSlides.length;
+    currentSlideIndex = (index + total) % total;
+    updateSlideUI();
+  }
+
+  function trackModalOpen(slug) {
+    fetch(`/api/click/${encodeURIComponent(slug)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    })
+      .then((res) => {
+        if (!res.ok) return;
+        const card = document.querySelector(`.product-open[data-slug="${CSS.escape(slug)}"]`);
+        if (!card) return;
+        const clickEl = card.querySelector('.product-clicks');
+        if (!clickEl) return;
+        const match = clickEl.textContent.match(/(\d+)/);
+        if (match) {
+          clickEl.innerHTML =
+            '<svg class="h-3.5 w-3.5 text-gold" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>' +
+            (parseInt(match[1], 10) + 1) +
+            ' klik';
+        }
+      })
+      .catch(() => {});
+  }
+
+  function openProductModal(slug) {
+    const product = modalProducts.find((p) => p.slug === slug);
+    if (!product) return;
+
+    activeSlug = slug;
+    modalTitle.textContent = product.name;
+    modalDesc.textContent = product.description || 'Tidak ada deskripsi.';
+
+    modalBadges.innerHTML = '';
+    (product.labels || []).forEach((label) => {
+      const span = document.createElement('span');
+      span.className = 'badge !py-0.5 !text-[10px]';
+      span.textContent = label;
+      modalBadges.appendChild(span);
+    });
+
+    modalLink.setAttribute('href', `/go/${encodeURIComponent(slug)}`);
+
+    destroyPlyr();
+    renderSlides(product);
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    document.body.classList.add('modal-scroll-lock');
+
+    trackModalOpen(slug);
+  }
+
+  function closeProductModal() {
+    if (!activeSlug) return;
+    activeSlug = null;
+    destroyPlyr();
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.body.classList.remove('modal-scroll-lock');
+  }
+
+  document.querySelectorAll('.product-open').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      const slug = e.target.closest('[data-slug]')?.dataset.slug || el.dataset.slug;
+      if (!slug) return;
+      openProductModal(slug);
+    });
+  });
+
+  modalClose.addEventListener('click', closeProductModal);
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeProductModal();
+  });
+
+  slidePrev.addEventListener('click', () => goToSlide(currentSlideIndex - 1));
+  slideNext.addEventListener('click', () => goToSlide(currentSlideIndex + 1));
+
+  slideDots.addEventListener('click', (e) => {
+    const dot = e.target.closest('.slide-dot');
+    if (dot) goToSlide(parseInt(dot.dataset.index, 10));
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (modal.classList.contains('hidden')) return;
+    if (e.key === 'Escape') closeProductModal();
+    if (e.key === 'ArrowLeft') goToSlide(currentSlideIndex - 1);
+    if (e.key === 'ArrowRight') goToSlide(currentSlideIndex + 1);
+  });
+
+  /* ---------------- Reveal + Stats ---------------- */
+
   const revealEls = document.querySelectorAll('.reveal:not(.is-visible)');
   if ('IntersectionObserver' in window) {
     const io = new IntersectionObserver(
@@ -466,3 +825,17 @@ const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
 
   filterProducts();
 </script>
+
+<style>
+  .slide-dot {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.4);
+    transition: all 0.2s ease;
+  }
+  .slide-dot.is-active {
+    background: #6366f1;
+    width: 1.1rem;
+  }
+</style>

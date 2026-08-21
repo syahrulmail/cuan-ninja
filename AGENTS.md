@@ -10,13 +10,15 @@ This file is the persistent memory for the cuan.ninja project. Read it at the st
 
 ## Architecture
 
-- `src/pages/index.astro` — catalog homepage (dark theme): hero + stats, sticky search, multi-label filter chips, product grid, empty state, how-it-works, footer.
-- `src/pages/go/[slug].js` — redirect engine: look up product by slug → track click → 302 to `affiliate_url`. Invalid slug → 404.
+- `src/pages/index.astro` — catalog homepage (dark theme): hero + stats, sticky search, multi-label filter chips, product grid, empty state, how-it-works, footer. **Product detail modal**: clicking a card opens a modal with a 6-media slideshow (1 YouTube video via Plyr custom player + up to 5 images), title, full description, and a "Lihat Halaman Lengkap" button.
+- `src/pages/go/[slug].js` — redirect engine: look up product by slug → track click → 302 to `affiliate_url`. Invalid slug → 404. Used by the modal's "Lihat Halaman Lengkap" button.
+- `src/pages/api/click/[slug].js` — POST endpoint that records a click WITHOUT redirecting. Called when the product modal opens (so modal-open counts as a click, per product requirement).
 - `src/lib/db.ts` — `Database` class wrapping D1 (`products`, `clicks` CRUD + stats). Helper `createDatabase(db)`.
 - `src/layouts/Layout.astro` — base layout: SEO/OG/Twitter/canonical meta, Inter + Plus Jakarta Sans fonts.
-- `src/styles/global.css` — Tailwind v4 theme (`@theme`) + components + utilities + `float-slow` keyframes.
-- `schema.sql` — D1 schema: `products`, `clicks`, trigger `increment_click_count`.
-- `scripts/seed.sql` — seed data (6 sample products). `scripts/seed.js` — generates same SQL to stdout for piping to wrangler.
+- `src/styles/global.css` — Tailwind v4 theme (`@theme`) + components + utilities + `float-slow` keyframes + Plyr dark-theme overrides + modal/slideshow classes.
+- `schema.sql` — D1 schema: `products` (incl. `video_url`, `images` JSON), `clicks`, trigger `increment_click_count`.
+- `scripts/migrate_media.sql` — ALTER TABLE to add `video_url` + `images` to existing DBs (needed for DBs created before the modal feature).
+- `scripts/seed.sql` — seed data (6 sample products with placeholder `video_url` + 5 `images` each). `scripts/seed.js` — generates same SQL to stdout for piping to wrangler.
 - `wrangler.toml` — D1 binding `cuan_db` → database `cuan-db` (id `35d394e1-a613-4c05-9e20-5fc1430c9a08`).
 - `astro.config.mjs` — `@astrojs/cloudflare` adapter + `@tailwindcss/vite` plugin.
 
@@ -33,6 +35,7 @@ Local run (D1 local + wrangler dev — use a background terminal):
 npx wrangler d1 create cuan-db --local
 npx wrangler d1 execute cuan-db --local --file=schema.sql
 npx wrangler d1 execute cuan-db --local --file=scripts/seed.sql
+npx wrangler d1 execute cuan-db --local --file=scripts/migrate_media.sql   # only if DB predates the media columns
 npx wrangler dev --local    # then hit http://localhost:8788
 ```
 
@@ -42,6 +45,7 @@ Deploy to Cloudflare:
 npx wrangler login          # or export CLOUDFLARE_API_TOKEN
 npx wrangler d1 execute cuan-db --remote --file=schema.sql
 npx wrangler d1 execute cuan-db --remote --file=scripts/seed.sql
+npx wrangler d1 execute cuan-db --remote --file=scripts/migrate_media.sql   # only if remote DB predates the media columns
 npx wrangler deploy
 ```
 
@@ -53,10 +57,14 @@ npx wrangler deploy
 4. **`wrangler` is NOT authenticated in the dev environment** (`wrangler whoami` → not authenticated). Any deploy must be done by the user (`npx wrangler login`) or with `CLOUDFLARE_API_TOKEN`; otherwise only local (`--local`) verification is possible from here.
 5. **The GitHub repo once lagged behind the live build.** `https://cuan.ninja` HTML/CSS is the design reference; the repo is the source of truth going forward. If they diverge again, reconcile before editing.
 6. **Do not re-seed the remote D1 blindly.** The production DB holds real click data (e.g. react-email-templates ~21 klik, total ~69) and multi-label categories already. `INSERT OR IGNORE` is safe; a fresh wipe would destroy stats.
-7. Local git identity must be set (env has none): `git config user.name "SyahrulMail"` / `git config user.email "dev@berbagi.or.id"`.
+7. **Astro CSRF protection:** POST requests to API endpoints WITHOUT a JSON `Content-Type` (or Origin header) get a hard `403 Cross-site POST form submissions are forbidden`. When calling `POST /api/click/{slug}` from the client, always send `headers: { 'Content-Type': 'application/json' }` (+ a JSON body).
+8. **Media fields:** `products.video_url` is a YouTube URL; `products.images` is a JSON array string of up to 5 image URLs. The modal slideshow = 1 video (Plyr, YouTube IFrame provider with custom UI) + up to 5 images. `parseImages()`/`buildSlides()` handle JSON parsing; keep that compatibility.
+9. **Plyr** (`plyr` npm package) is used for the video player; its CSS is imported in `global.css` (`@import "plyr/dist/plyr.css"`) and overridden for the dark theme. The video embed is rendered client-side (`data-plyr-provider="youtube"` + `data-plyr-embed-id`); Plyr loads the YouTube IFrame API automatically.
+10. Local git identity must be set (env has none): `git config user.name "SyahrulMail"` / `git config user.email "dev@berbagi.or.id"`.
 
 ## History (recent work)
 
+- *(next)* — Product detail modal feature (this work is pending commit).
 - `99c17c1` — Rebuilt homepage to match the live design and fixed the Astro 7 D1 binding:
   - Switched all DB access to `cloudflare:workers` env.
   - Reconstructed navbar, hero + stats, sticky search + multi-label chips, product grid, empty state, how-it-works, footer.
@@ -69,9 +77,9 @@ npx wrangler deploy
 ## Current state & next steps
 
 - Done: homepage parity with live; repo builds clean; verified locally end-to-end.
+- In progress: product detail modal (slideshow video + images, tracking on open). **Media data (`video_url` + 5 `images` per product) is placeholder** — the user will supply real product data; replace in `scripts/seed.sql` + remote D1 via UPDATE (do NOT delete existing rows).
 - **Deploy pending** — the rebuilt code is committed but NOT yet deployed to Cloudflare (needs wrangler auth from the user).
 - Backlog (optional):
-  - Product detail page (`/p/{slug}`) instead of redirect-only.
   - Admin CRUD to add/edit/delete products without SQL.
   - Per-category listing pages.
   - Sitemap / structured data (Product schema) for SEO.

@@ -6,6 +6,8 @@ interface Product {
   affiliate_url: string;
   image_url: string | null;
   category: string | null;
+  video_url: string | null;
+  images: string | null;
   click_count: number;
   created_at: string;
   updated_at: string;
@@ -52,16 +54,28 @@ export class Database {
   }
 
   // Create new product
-  async createProduct(product: Omit<Product, 'id' | 'click_count' | 'created_at' | 'updated_at'>): Promise<Product> {
+  async createProduct(
+    product: Omit<Product, 'id' | 'click_count' | 'created_at' | 'updated_at'>
+  ): Promise<Product> {
     const id = crypto.randomUUID();
     await this.db
       .prepare(`
-        INSERT INTO products (id, slug, name, description, affiliate_url, image_url, category)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (id, slug, name, description, affiliate_url, image_url, category, video_url, images)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .bind(id, product.slug, product.name, product.description, product.affiliate_url, product.image_url, product.category)
+      .bind(
+        id,
+        product.slug,
+        product.name,
+        product.description,
+        product.affiliate_url,
+        product.image_url,
+        product.category,
+        product.video_url,
+        product.images
+      )
       .run();
-    
+
     return this.getProductBySlug(product.slug) as Promise<Product>;
   }
 
