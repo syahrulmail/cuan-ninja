@@ -77,7 +77,7 @@ npx wrangler deploy
 ## Current state & next steps
 
 - Done: homepage parity with live; repo builds clean; verified locally end-to-end.
-- In progress: product detail modal (slideshow video + images, tracking on open). **Media data (`video_url` + 5 `images` per product) is placeholder** — the user will supply real product data; replace in `scripts/seed.sql` + remote D1 via UPDATE (do NOT delete existing rows).
+- In progress: product detail modal (slideshow video + images, tracking on open). **One real product seeded: DripSender** (`dripsender`, affiliate `https://dripsender.id`, video `youtu.be/b9fDIP9B2wg`, 5 webp images from dripsender.id, label "Email Marketing"). The other 5 products still use placeholder media (`video_url` + `images`) — the user will supply real data; replace in `scripts/seed.sql` + remote D1 via UPDATE (do NOT delete existing rows).
 - **Deploy pending** — the rebuilt code is committed but NOT yet deployed to Cloudflare (needs wrangler auth from the user).
 - Backlog (optional):
   - Admin CRUD to add/edit/delete products without SQL.

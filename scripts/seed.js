@@ -104,6 +104,22 @@ const sampleProducts = [
       'https://images.unsplash.com/photo-1596526131083-e8c633c948d2?w=800',
       'https://images.unsplash.com/photo-1614064641938-3bbee52942c7?w=800'
     ]
+  },
+  {
+    slug: 'dripsender',
+    name: 'DripSender',
+    description: 'Platform cold email untuk outreach massal: kirim ribuan email hangat dengan aman, kelola banyak domain & akun email, rotasi otomatis, optimasi deliverability, dan pantau bounce secara real-time. Cocok untuk agensi dan tim sales yang mengandalkan email outreach.',
+    affiliate_url: 'https://dripsender.id',
+    image_url: 'https://dripsender.id/images/csai.webp',
+    category: 'Email Marketing',
+    video_url: 'https://youtu.be/b9fDIP9B2wg',
+    images: [
+      'https://dripsender.id/images/csai.webp',
+      'https://dripsender.id/_image?href=%2F%40fs%2Fhome%2Fadmin%2Fdripsender-26%2Fsrc%2Fassets%2Fimg%2Fssds9.jpg%3ForigWidth%3D850%26origHeight%3D924%26origFormat%3Djpg&w=2432&h=1442&f=webp',
+      'https://dripsender.id/_image?href=%2F%40fs%2Fhome%2Fadmin%2Fdripsender-26%2Fsrc%2Fassets%2Fimg%2Fssds6.jpg%3ForigWidth%3D786%26origHeight%3D925%26origFormat%3Djpg&w=2432&h=1442&f=webp',
+      'https://dripsender.id/_image?href=%2F%40fs%2Fhome%2Fadmin%2Fdripsender-26%2Fsrc%2Fassets%2Fimg%2Fssds7.jpg%3ForigWidth%3D752%26origHeight%3D924%26origFormat%3Djpg&w=2432&h=1442&f=webp',
+      'https://dripsender.id/_image?href=%2F%40fs%2Fhome%2Fadmin%2Fdripsender-26%2Fsrc%2Fassets%2Fimg%2Fssds8.jpg%3ForigWidth%3D716%26origHeight%3D924%26origFormat%3Djpg&w=2432&h=1442&f=webp'
+    ]
   }
 ];
 
