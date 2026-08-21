@@ -1,0 +1,532 @@
+---
+import { env } from 'cloudflare:workers';
+import Layout from '../layouts/Layout.astro';
+import { createDatabase } from '../lib/db.js';
+
+const db = createDatabase(env.cuan_db);
+const url = new URL(Astro.request.url);
+const errorParam = url.searchParams.get('error');
+const successParam = url.searchParams.get('success');
+
+// ---- Session helper: HMAC-signed cookie ----
+const enc = new TextEncoder();
+const cookieName = 'cuan_admin';
+
+async function hmacKey() {
+  return crypto.subtle.importKey(
+    'raw',
+    enc.encode('cuan.ninja:admin:' + (env.ADMIN_PASSWORD || '')),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+async function signSession() {
+  const payload = 'admin:' + Date.now();
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(), enc.encode(payload));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
+  return payload + '.' + sigB64;
+}
+
+async function isAuthed() {
+  const cookie = Astro.cookies.get(cookieName)?.value;
+  if (!cookie) return false;
+  const dot = cookie.lastIndexOf('.');
+  if (dot <= 0) return false;
+  const payload = cookie.slice(0, dot);
+  const sigB64 = cookie.slice(dot + 1);
+  let sig;
+  try {
+    sig = Uint8Array.from(atob(sigB64), (c) => c.charCodeAt(0));
+  } catch {
+    return false;
+  }
+  const valid = await crypto.subtle.verify('HMAC', await hmacKey(), sig, enc.encode(payload));
+  if (!valid) return false;
+  // session expires after 12h
+  const ts = Number(payload.split(':')[1]);
+  return !isNaN(ts) && Date.now() - ts < 12 * 60 * 60 * 1000;
+}
+
+// ---- POST handling ----
+let flashError: string | null = null;
+let flashSuccess: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const action = String(formData.get('action') || '');
+
+  if (action === 'login') {
+    const password = String(formData.get('password') || '');
+    const expected = env.ADMIN_PASSWORD || '';
+    if (expected && password === expected) {
+      Astro.cookies.set(cookieName, await signSession(), {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        maxAge: 60 * 60 * 12
+      });
+      return Astro.redirect('/admin');
+    }
+    return Astro.redirect('/admin?error=login');
+  }
+
+  if (!(await isAuthed())) {
+    return Astro.redirect('/admin?error=login');
+  }
+
+  if (action === 'logout') {
+    Astro.cookies.delete(cookieName, { path: '/' });
+    return Astro.redirect('/admin');
+  }
+
+  if (action === 'create') {
+    const name = String(formData.get('name') || '').trim();
+    const slug = String(formData.get('slug') || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    const affiliateUrl = String(formData.get('affiliate_url') || '').trim();
+    if (!name || !slug || !affiliateUrl) {
+      flashError = 'Nama, slug, dan URL affiliate wajib diisi.';
+    } else {
+      const existing = await db.getProductBySlug(slug);
+      if (existing) {
+        flashError = 'Slug sudah dipakai produk lain.';
+      } else {
+        const labels = splitLabels(String(formData.get('category') || ''));
+        const images = splitLines(String(formData.get('images') || ''));
+        await db.createProduct({
+          slug,
+          name,
+          description: String(formData.get('description') || '').trim() || null,
+          affiliate_url: affiliateUrl,
+          image_url: String(formData.get('image_url') || '').trim() || null,
+          category: labels.length ? JSON.stringify(labels) : null,
+          video_url: String(formData.get('video_url') || '').trim() || null,
+          images: images.length ? JSON.stringify(images) : null
+        });
+        flashSuccess = `Produk "${name}" berhasil ditambahkan.`;
+      }
+    }
+  }
+
+  if (action === 'update') {
+    const slug = String(formData.get('slug') || '').trim();
+    const name = String(formData.get('name') || '').trim();
+    const affiliateUrl = String(formData.get('affiliate_url') || '').trim();
+    const product = slug ? await db.getProductBySlug(slug) : null;
+    if (!product) {
+      flashError = 'Produk tidak ditemukan.';
+    } else if (!name || !affiliateUrl) {
+      flashError = 'Nama dan URL affiliate wajib diisi.';
+    } else {
+      const labels = splitLabels(String(formData.get('category') || ''));
+      const images = splitLines(String(formData.get('images') || ''));
+      await db.updateProduct(slug, {
+        name,
+        description: String(formData.get('description') || '').trim() || null,
+        affiliate_url: affiliateUrl,
+        image_url: String(formData.get('image_url') || '').trim() || null,
+        category: labels.length ? JSON.stringify(labels) : null,
+        video_url: String(formData.get('video_url') || '').trim() || null,
+        images: images.length ? JSON.stringify(images) : null
+      });
+      flashSuccess = `Produk "${name}" berhasil diperbarui.`;
+    }
+  }
+
+  if (action === 'delete') {
+    const slug = String(formData.get('slug') || '').trim();
+    const product = slug ? await db.getProductBySlug(slug) : null;
+    if (product) {
+      await db.deleteProduct(slug);
+      flashSuccess = `Produk "${product.name}" berhasil dihapus.`;
+    } else {
+      flashError = 'Produk tidak ditemukan.';
+    }
+  }
+}
+
+// ---- Data (when authed) ----
+const authed = await isAuthed();
+const products = authed ? await db.getAllProducts() : [];
+const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
+
+function splitLabels(raw: string): string[] {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {
+      /* fall through */
+    }
+  }
+  return trimmed
+    .split(',')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+function splitLines(raw: string): string[] {
+  return (raw || '')
+    .split(/[\n,]+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+function parseLabelsForForm(raw: string | null): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.join(', ');
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
+function parseImagesForForm(raw: string | null): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.join('\n');
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+---
+
+<Layout title="Admin | Cuan.ninja" canonical="https://cuan.ninja/admin">
+  <div class="relative min-h-screen flex flex-col overflow-x-clip">
+    <!-- Navbar -->
+    <header class="sticky top-0 z-40 border-b border-border/60 bg-bg-primary/80 backdrop-blur-xl">
+      <nav class="mx-auto max-w-7xl px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
+        <a href="/" class="flex items-center gap-2.5 shrink-0">
+          <span class="grid place-items-center h-8 w-8 rounded-lg bg-gradient-to-br from-accent to-accent-2 shadow-[0_0_18px_rgba(99,102,241,0.45)]">
+            <svg class="h-4.5 w-4.5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M21 7v4h-4" />
+            </svg>
+          </span>
+          <span class="font-display text-lg font-bold tracking-tight">
+            Cuan<span class="text-gradient">.ninja</span>
+          </span>
+        </a>
+        <div class="flex items-center gap-1">
+          <a href="/" class="nav-link">Katalog</a>
+          <a href="/#how" class="nav-link hidden sm:inline-flex">Cara Kerja</a>
+          <a href="/#catalog" class="btn-primary ml-2 !py-2 !px-4 text-xs">
+            Jelajahi
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+            </svg>
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="flex-1">
+      <main class="bg-bg-primary text-text-primary px-5 sm:px-8 py-10">
+        <div class="max-w-5xl mx-auto">
+          <header class="mb-10 flex items-center justify-between">
+            <div>
+              <span class="badge !text-accent !border-accent/40 !bg-accent/10 mb-3">
+                <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                Area Terkunci
+              </span>
+              <h1 class="font-display text-3xl font-bold">Admin <span class="text-gradient">Cuan.ninja</span></h1>
+              <p class="text-text-secondary text-sm mt-1">Kelola produk katalog.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              {authed && (
+                <form method="POST" class="inline">
+                  <input type="hidden" name="action" value="logout" />
+                  <button type="submit" class="btn-ghost !py-2 !px-4 !text-xs">
+                    Keluar
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                </form>
+              )}
+              <a href="/" class="btn-ghost !py-2 !px-4 !text-xs">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Lihat situs
+              </a>
+            </div>
+          </header>
+
+          {!authed ? (
+            <section class="max-w-md mx-auto card p-8 sm:p-10 relative overflow-hidden">
+              <div class="absolute top-[-60px] right-[-60px] h-40 w-40 rounded-full bg-accent/20 blur-3xl" aria-hidden="true"></div>
+              <div class="relative">
+                <div class="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-accent-2 shadow-[0_0_24px_rgba(99,102,241,0.35)]">
+                  <svg class="h-6 w-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                </div>
+                <h2 class="font-display text-xl font-bold mb-1">Masuk ke Panel</h2>
+                <p class="text-sm text-text-secondary mb-6">Masukkan password untuk mengelola produk.</p>
+
+                {errorParam === 'login' && (
+                  <div class="mb-4 px-4 py-3 rounded-xl border border-red-500/40 bg-red-500/10 text-sm text-red-300">
+                    Password salah. Coba lagi.
+                  </div>
+                )}
+
+                <form method="POST" class="space-y-4">
+                  <input type="hidden" name="action" value="login" />
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Password</label>
+                    <input type="password" name="password" class="input-base" placeholder="••••••••" required autofocus />
+                  </div>
+                  <button type="submit" class="btn-primary w-full !py-3">
+                    Masuk
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </button>
+                </form>
+              </div>
+            </section>
+          ) : (
+            <div class="space-y-8">
+              {flashError && (
+                <div class="px-4 py-3 rounded-xl border border-red-500/40 bg-red-500/10 text-sm text-red-300">
+                  {flashError}
+                </div>
+              )}
+              {flashSuccess && (
+                <div class="px-4 py-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-sm text-emerald-300">
+                  {flashSuccess}
+                </div>
+              )}
+              {successParam === 'done' && (
+                <div class="px-4 py-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-sm text-emerald-300">
+                  Perubahan berhasil disimpan.
+                </div>
+              )}
+
+              <!-- Stats -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="card p-5">
+                  <p class="font-display text-3xl font-bold">{products.length}</p>
+                  <p class="mt-1 text-xs sm:text-sm text-text-secondary uppercase tracking-wider">Produk</p>
+                </div>
+                <div class="card p-5">
+                  <p class="font-display text-3xl font-bold">{totalClicks}</p>
+                  <p class="mt-1 text-xs sm:text-sm text-text-secondary uppercase tracking-wider">Total Klik</p>
+                </div>
+                <div class="card p-5">
+                  <p class="font-display text-3xl font-bold">{new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  <p class="mt-1 text-xs sm:text-sm text-text-secondary uppercase tracking-wider">Tanggal</p>
+                </div>
+              </div>
+
+              <!-- Tambah produk -->
+              <section class="card p-6 sm:p-8">
+                <div class="flex items-center gap-3 mb-6">
+                  <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-2 text-white">
+                    <svg class="h-4.5 w-4.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 class="font-display text-lg font-bold">Tambah Produk Baru</h2>
+                    <p class="text-xs text-text-secondary">Isi detail produk lalu simpan.</p>
+                  </div>
+                </div>
+
+                <form method="POST" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <input type="hidden" name="action" value="create" />
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Nama Produk *</label>
+                    <input type="text" name="name" class="input-base" required placeholder="contoh: Notion Template" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Slug *</label>
+                    <input type="text" name="slug" class="input-base" required placeholder="contoh: notion-template" pattern="[a-z0-9-]+" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Deskripsi</label>
+                    <textarea name="description" rows="3" class="input-base" placeholder="Deskripsi lengkap produk..."></textarea>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Affiliate *</label>
+                    <input type="url" name="affiliate_url" class="input-base" required placeholder="https://..." />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Gambar Utama</label>
+                    <input type="url" name="image_url" class="input-base" placeholder="https://..." />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Label (pisahkan koma)</label>
+                    <input type="text" name="category" class="input-base" placeholder="contoh: Productivity, Tools" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Video (YouTube)</label>
+                    <input type="url" name="video_url" class="input-base" placeholder="https://youtu.be/..." />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Gambar Slideshow (satu per baris)</label>
+                    <textarea name="images" rows="3" class="input-base" placeholder="https://.../1.jpg&#10;https://.../2.jpg"></textarea>
+                  </div>
+                  <div class="sm:col-span-2 flex justify-end">
+                    <button type="submit" class="btn-primary !py-2.5">
+                      Simpan Produk
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <!-- Daftar produk -->
+              <section>
+                <div class="flex items-center justify-between mb-4">
+                  <h2 class="font-display text-lg font-bold">Daftar Produk ({products.length})</h2>
+                </div>
+
+                <div class="space-y-3">
+                  {products.map((p) => (
+                    <article class="card p-5">
+                      <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <div class="flex items-center gap-3 flex-1 min-w-0">
+                          {p.image_url ? (
+                            <img src={p.image_url} alt={p.name} loading="lazy" class="h-14 w-14 rounded-xl object-cover border border-border shrink-0" />
+                          ) : (
+                            <span class="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-bg-surface border border-border text-text-secondary">
+                              <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                            </span>
+                          )}
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                              <h3 class="font-display font-bold truncate">{p.name}</h3>
+                              {p.labels && (
+                                <div class="flex items-center gap-1 flex-wrap">
+                                  {(() => {
+                                    let labels: string[] = [];
+                                    try { labels = JSON.parse(p.labels as string); } catch { labels = String(p.labels).split(',').map((s) => s.trim()); }
+                                    return labels.filter(Boolean).slice(0, 3).map((l) => <span class="badge !text-[10px]">{l}</span>);
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+                            <p class="text-xs text-text-secondary mt-0.5 truncate">
+                              /{p.slug} · {p.click_count || 0} klik · {p.video_url ? 'video ✓' : ''} {p.images ? 'slideshow ✓' : ''}
+                            </p>
+                            <a href={p.affiliate_url} target="_blank" rel="noopener noreferrer" class="text-xs text-accent hover:text-accent-2 transition-colors mt-0.5 inline-block">
+                              {p.affiliate_url}
+                            </a>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <a href={`/admin?edit=${p.slug}`} class="btn-ghost !py-2 !px-3 !text-xs">
+                            Edit
+                          </a>
+                          <form method="POST" onsubmit="return confirm('Hapus produk ini?')" class="inline">
+                            <input type="hidden" name="action" value="delete" />
+                            <input type="hidden" name="slug" value={p.slug} />
+                            <button type="submit" class="btn-ghost !py-2 !px-3 !text-xs hover:!border-red-500/50 hover:!bg-red-500/10 hover:!text-red-300">
+                              Hapus
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+
+                      {url.searchParams.get('edit') === p.slug && (
+                        <form method="POST" class="mt-5 pt-5 border-t border-border grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <input type="hidden" name="action" value="update" />
+                          <input type="hidden" name="slug" value={p.slug} />
+                          <div>
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">Nama Produk *</label>
+                            <input type="text" name="name" class="input-base" required value={p.name} />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">Slug (tidak bisa diubah)</label>
+                            <input type="text" class="input-base" value={p.slug} disabled />
+                          </div>
+                          <div class="sm:col-span-2">
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">Deskripsi</label>
+                            <textarea name="description" rows="3" class="input-base">{p.description || ''}</textarea>
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Affiliate *</label>
+                            <input type="url" name="affiliate_url" class="input-base" required value={p.affiliate_url} />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Gambar Utama</label>
+                            <input type="url" name="image_url" class="input-base" value={p.image_url || ''} />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">Label (pisahkan koma)</label>
+                            <input type="text" name="category" class="input-base" value={parseLabelsForForm(p.category)} />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Video (YouTube)</label>
+                            <input type="url" name="video_url" class="input-base" value={p.video_url || ''} />
+                          </div>
+                          <div class="sm:col-span-2">
+                            <label class="block text-sm font-medium text-text-secondary mb-1.5">URL Gambar Slideshow (satu per baris)</label>
+                            <textarea name="images" rows="3" class="input-base">{parseImagesForForm(p.images)}</textarea>
+                          </div>
+                          <div class="sm:col-span-2 flex items-center justify-end gap-2">
+                            <a href="/admin" class="btn-ghost !py-2.5">Batal</a>
+                            <button type="submit" class="btn-primary !py-2.5">
+                              Simpan Perubahan
+                              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </article>
+                  ))}
+                </div>
+
+                {products.length === 0 && (
+                  <div class="card p-10 text-center text-text-secondary">
+                    Belum ada produk. Tambahkan produk pertama lewat form di atas.
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
+      </main>
+    </main>
+
+    <footer class="border-t border-border/60 mt-20">
+      <div class="mx-auto max-w-7xl px-5 sm:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-2.5">
+          <span class="grid place-items-center h-7 w-7 rounded-lg bg-gradient-to-br from-accent to-accent-2">
+            <svg class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M21 7v4h-4" />
+            </svg>
+          </span>
+          <span class="text-sm font-medium text-text-secondary">© 2026 Cuan.ninja · Kurasi produk digital terpilih</span>
+        </div>
+        <div class="flex items-center gap-4 text-sm text-text-secondary">
+          <a href="/#catalog" class="hover:text-text-primary transition-colors">Katalog</a>
+          <a href="/#how" class="hover:text-text-primary transition-colors">Cara Kerja</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+</Layout>

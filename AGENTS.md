@@ -13,6 +13,7 @@ This file is the persistent memory for the cuan.ninja project. Read it at the st
 - `src/pages/index.astro` — catalog homepage (dark theme): hero + stats, sticky search, multi-label filter chips, product grid, empty state, how-it-works, footer. **Product detail modal**: clicking a card opens a modal with a 6-media slideshow (1 YouTube video via Plyr custom player + up to 5 images), title, full description, and a "Lihat Halaman Lengkap" button.
 - `src/pages/go/[slug].js` — redirect engine: look up product by slug → track click → 302 to `affiliate_url`. Invalid slug → 404. Used by the modal's "Lihat Halaman Lengkap" button.
 - `src/pages/api/click/[slug].js` — POST endpoint that records a click WITHOUT redirecting. Called when the product modal opens (so modal-open counts as a click, per product requirement).
+- `src/pages/admin.astro` — password-protected admin panel: login (password checked against the `ADMIN_PASSWORD` secret via an HMAC-signed `cuan_admin` cookie), product list with stats, add/edit/delete products (CRUD) without SQL. Access at `/admin`.
 - `src/lib/db.ts` — `Database` class wrapping D1 (`products`, `clicks` CRUD + stats). Helper `createDatabase(db)`.
 - `src/layouts/Layout.astro` — base layout: SEO/OG/Twitter/canonical meta, Inter + Plus Jakarta Sans fonts.
 - `src/styles/global.css` — Tailwind v4 theme (`@theme`) + components + utilities + `float-slow` keyframes + Plyr dark-theme overrides + modal/slideshow classes.
@@ -61,10 +62,15 @@ npx wrangler deploy
 8. **Media fields:** `products.video_url` is a YouTube URL; `products.images` is a JSON array string of up to 5 image URLs. The modal slideshow = 1 video (Plyr, YouTube IFrame provider with custom UI) + up to 5 images. `parseImages()`/`buildSlides()` handle JSON parsing; keep that compatibility.
 9. **Plyr** (`plyr` npm package) is used for the video player; its CSS is imported in `global.css` (`@import "plyr/dist/plyr.css"`) and overridden for the dark theme. The video embed is rendered client-side (`data-plyr-provider="youtube"` + `data-plyr-embed-id`); Plyr loads the YouTube IFrame API automatically.
 10. Local git identity must be set (env has none): `git config user.name "SyahrulMail"` / `git config user.email "dev@berbagi.or.id"`.
+11. **Admin panel password = `ADMIN_PASSWORD` Cloudflare secret.** Login is an HMAC-signed cookie (`cuan_admin`, 12h, SameSite=Strict). The worker setting binding shows the secret name; its value is only stored server-side — set it with `echo "<pw>" | npx wrangler secret put ADMIN_PASSWORD` (or `.dev.vars` for local dev).
+12. **`wrangler versions secret put` creates a NEW version from the LATEST uploaded code**, not from whatever is currently deployed. If you need a secret on an older worker version, deploy that code first, then set the secret. And `wrangler rollback <version-id>` instantly switches 100% traffic — use it carefully (it does NOT roll back D1/KV/secret bindings).
 
 ## History (recent work)
 
-- *(next)* — Product detail modal feature (this work is pending commit).
+- *(next)* — Admin panel + deployment (this work is pending commit).
+- `292f379` — Added DripSender product with real media (video `b9fDIP9B2wg` + 5 webp images from dripsender.id).
+- `34a5022` — Product detail modal with video slideshow + click tracking on open.
+- `a776b5b` — AGENTS.md persistent memory.
 - `99c17c1` — Rebuilt homepage to match the live design and fixed the Astro 7 D1 binding:
   - Switched all DB access to `cloudflare:workers` env.
   - Reconstructed navbar, hero + stats, sticky search + multi-label chips, product grid, empty state, how-it-works, footer.
@@ -76,11 +82,10 @@ npx wrangler deploy
 
 ## Current state & next steps
 
-- Done: homepage parity with live; repo builds clean; verified locally end-to-end.
-- In progress: product detail modal (slideshow video + images, tracking on open). **One real product seeded: DripSender** (`dripsender`, affiliate `https://dripsender.id`, video `youtu.be/b9fDIP9B2wg`, 5 webp images from dripsender.id, label "Email Marketing"). The other 5 products still use placeholder media (`video_url` + `images`) — the user will supply real data; replace in `scripts/seed.sql` + remote D1 via UPDATE (do NOT delete existing rows).
-- **Deploy pending** — the rebuilt code is committed but NOT yet deployed to Cloudflare (needs wrangler auth from the user).
+- Done: homepage parity with live; product detail modal; admin panel CRUD (`/admin`, password from `ADMIN_PASSWORD` secret); **DEPLOYED** — live site runs the current repo code at https://cuan.ninja (Worker `cuan-ninja`, D1 `cuan-db`).
+- Products in remote D1 (7): 6 sample (`notion-template-second-brain`, `saas-boilerplate-nextjs`, `figma-design-system-kit`, `ai-content-automation-course`, `notion-life-os`, `react-email-templates`) + DripSender (`dripsender`, affiliate `https://dripsender.id`, video `b9fDIP9B2wg`, 5 webp images from dripsender.id, label "Email Marketing"). The 5 sample products still use placeholder media — user will supply real data; edit via `/admin` (preferred) or UPDATE in remote D1 (do NOT delete rows).
+- Deploy flow (authenticated as user's Cloudflare token): `npx wrangler deploy` after `npm run build`; remote D1 ops via `npx wrangler d1 execute cuan-db --remote --file=...`; admin password secret set via `npx wrangler secret put ADMIN_PASSWORD`.
 - Backlog (optional):
-  - Admin CRUD to add/edit/delete products without SQL.
   - Per-category listing pages.
   - Sitemap / structured data (Product schema) for SEO.
 
