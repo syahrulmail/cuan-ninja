@@ -1,13 +1,14 @@
+import { env } from 'cloudflare:workers';
 import { createDatabase } from '../../lib/db.js';
 
-export async function GET({ params, locals, request, redirect }) {
+export async function GET({ params, request, redirect }) {
   const slug = params.slug;
 
   if (!slug) {
     return new Response('Not Found', { status: 404 });
   }
 
-  const db = createDatabase(locals.runtime.env.cuan_db);
+  const db = createDatabase(env.cuan_db);
   const product = await db.getProductBySlug(slug);
 
   if (!product) {

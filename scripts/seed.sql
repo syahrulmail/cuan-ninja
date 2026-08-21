@@ -54,5 +54,5 @@ INSERT OR IGNORE INTO products (id, slug, name, description, affiliate_url, imag
   '50+ template email transaksional & marketing responsif. Kompatibel React Email, MJML, dan plain HTML. Termasuk dark mode.',
   'https://example.com/affiliate/react-email',
   'https://images.unsplash.com/photo-1586717791821-3f44a563fa4c?w=800',
-  'Developer Tools'
+  '["Developer Tools","Email","Marketing"]'
 );

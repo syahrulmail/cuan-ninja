@@ -1,13 +1,20 @@
 ---
+import { env } from 'cloudflare:workers';
 import Layout from '../layouts/Layout.astro';
 
-const cuan_db = Astro.locals.runtime?.env?.cuan_db;
+const cuan_db = env.cuan_db;
 
 if (!cuan_db) {
-  return new Response("D1 Binding 'cuan_db' tidak ditemukan! Silakan cek Dashboard Cloudflare -> Settings -> Functions.", { status: 500 });
+  return new Response(
+    "D1 Binding 'cuan_db' tidak ditemukan! Silakan cek Dashboard Cloudflare -> Settings -> Functions.",
+    { status: 500 }
+  );
 }
 
-const { results } = await cuan_db.prepare("SELECT * FROM products ORDER BY id DESC").all();
+const { results } = await cuan_db
+  .prepare('SELECT * FROM products ORDER BY created_at DESC')
+  .all();
+
 const products = results as Array<{
   id: string;
   slug: string;
@@ -18,173 +25,444 @@ const products = results as Array<{
   category: string | null;
   click_count: number;
 }>;
+
+function parseLabels(raw: string | null): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed.map(String) : [trimmed];
+    } catch {
+      return [trimmed];
+    }
+  }
+  return trimmed
+    .split(',')
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+const labeledProducts = products.map((product) => ({
+  ...product,
+  labels: parseLabels(product.category)
+}));
+
+const allLabels = [...new Set(labeledProducts.flatMap((p) => p.labels))].sort((a, b) =>
+  a.localeCompare(b)
+);
+
+const totalClicks = products.reduce((sum, p) => sum + (p.click_count || 0), 0);
 ---
 
 <Layout title="Cuan.ninja | Kurasi Produk Digital">
-  <main class="min-h-screen bg-bg-primary text-text-primary p-6 md:p-12">
-    <!-- Header -->
-    <header class="max-w-7xl mx-auto mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
-      <div>
-        <h1 class="text-3xl md:text-4xl font-bold tracking-tight">
-          Cuan<span class="text-accent">.ninja</span>
-        </h1>
-        <p class="text-text-secondary mt-1 text-sm md:text-base">
-          Kurasi produk digital terpilih untuk developer & kreator.
-        </p>
-      </div>
-      <div class="w-full md:w-80">
-        <input 
-          type="text" 
-          id="search-input"
-          placeholder="Cari template, boilerplate, course..." 
-          class="input-base"
-        />
-      </div>
+  <div class="relative min-h-screen flex flex-col overflow-x-clip">
+    <!-- Navbar -->
+    <header class="sticky top-0 z-40 border-b border-border/60 bg-bg-primary/80 backdrop-blur-xl">
+      <nav class="mx-auto max-w-7xl px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
+        <a href="/" class="flex items-center gap-2.5 shrink-0">
+          <span class="grid place-items-center h-8 w-8 rounded-lg bg-gradient-to-br from-accent to-accent-2 shadow-[0_0_18px_rgba(99,102,241,0.45)]">
+            <svg class="h-4.5 w-4.5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M21 7v4h-4" />
+            </svg>
+          </span>
+          <span class="font-display text-lg font-bold tracking-tight">
+            Cuan<span class="text-gradient">.ninja</span>
+          </span>
+        </a>
+        <div class="flex items-center gap-1">
+          <a href="/" class="nav-link">Katalog</a>
+          <a href="/#how" class="nav-link hidden sm:inline-flex">Cara Kerja</a>
+          <a href="/#catalog" class="btn-primary ml-2 !py-2 !px-4 text-xs">
+            Jelajahi
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+            </svg>
+          </a>
+        </div>
+      </nav>
     </header>
 
-    <!-- Stats Bar -->
-    <div class="max-w-7xl mx-auto mb-8 flex flex-wrap gap-4 text-sm text-text-secondary">
-      <span>{products.length} Produk Tersedia</span>
-      <span>·</span>
-      <span id="filtered-count" class="text-accent font-medium">{products.length} ditampilkan</span>
-    </div>
+    <main class="flex-1">
+      <!-- Hero -->
+      <section class="relative">
+        <div
+          class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]"
+          aria-hidden="true"
+        ></div>
+        <div class="absolute top-[-120px] left-1/2 -translate-x-1/2 glow-orb h-[360px] w-[640px] bg-accent/20 animate-float-slow" aria-hidden="true"></div>
+        <div class="absolute top-[40px] left-[10%] glow-orb h-[200px] w-[200px] bg-gold/10 animate-float-slow" style="animation-delay:-3s" aria-hidden="true"></div>
+        <div class="absolute top-[80px] right-[8%] glow-orb h-[220px] w-[220px] bg-accent-2/15 animate-float-slow" style="animation-delay:-6s" aria-hidden="true"></div>
 
-    <!-- Category Filter -->
-    <div class="max-w-7xl mx-auto mb-8 flex flex-wrap gap-2" role="group" aria-label="Kategori produk">
-      <button 
-        class="filter-btn badge bg-accent/20 text-accent border-accent/50"
-        data-category="all"
-      >
-        Semua
-      </button>
-      {Array.from(new Set(products.map(p => p.category).filter(Boolean))).map(cat => (
-        <button 
-          class="filter-btn badge"
-          data-category={cat}
-        >
-          {cat}
-        </button>
-      ))}
-    </div>
+        <div class="relative mx-auto max-w-7xl px-5 sm:px-8 pt-20 pb-14 text-center">
+          <div class="reveal is-visible">
+            <span class="badge !py-1.5 !px-4 !text-xs !text-accent !border-accent/40 !bg-accent/10 mb-6">
+              <span class="inline-block h-1.5 w-1.5 rounded-full bg-gold animate-pulse mr-1.5"></span>
+              Kurasi produk digital terbaik
+            </span>
+          </div>
+          <h1 class="reveal is-visible font-display text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.05]">
+            Temukan Produk Digital
+            <br />
+            yang Bikin <span class="text-gradient">Cuan</span>
+          </h1>
+          <p class="reveal is-visible mt-6 mx-auto max-w-2xl text-base sm:text-lg text-text-secondary">
+            Template, boilerplate, course, dan tools yang sudah kami kurasi untuk developer &amp; kreator. Hemat waktumu riset — langsung pilih yang kamu butuhkan.
+          </p>
 
-    <!-- Product Grid -->
-    <div class="max-w-7xl mx-auto">
-      <div 
-        id="product-grid"
-        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-      >
-        {products.map((product) => (
-          <article 
-            class="card group"
-            data-category={product.category || ''}
-            data-name={product.name.toLowerCase()}
-          >
-            {product.image_url && (
-              <div class="aspect-video overflow-hidden relative">
-                <img 
-                  src={product.image_url} 
-                  alt={product.name}
-                  class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  loading="lazy"
-                />
-              </div>
-            )}
-            <div class="p-5 space-y-3">
-              <div class="flex items-center justify-between">
-                <h3 class="font-semibold text-lg line-clamp-1">{product.name}</h3>
-                {product.category && (
-                  <span class="badge ml-2 shrink-0">{product.category}</span>
-                )}
-              </div>
-              <p class="text-text-secondary text-sm line-clamp-2">
-                {product.description || 'Tidak ada deskripsi.'}
-              </p>
-              <div class="flex items-center justify-between pt-2 border-t border-border">
-                <span class="text-sm text-text-secondary">
-                  {product.click_count} klik
-                </span>
-                <a 
-                  href={`/go/${product.slug}`}
-                  class="btn-primary text-sm px-4 py-2"
-                >
-                  Lihat Produk
-                </a>
-              </div>
+          <!-- Stats -->
+          <div class="reveal is-visible mt-12 flex flex-wrap items-center justify-center gap-x-12 gap-y-6">
+            <div class="text-center">
+              <p class="font-display text-3xl sm:text-4xl font-bold stat-count" data-target={products.length}>0</p>
+              <p class="mt-1 text-xs sm:text-sm text-text-secondary uppercase tracking-wider">Produk</p>
             </div>
-          </article>
-        ))}
+            <div class="h-12 w-px bg-border hidden sm:block"></div>
+            <div class="text-center">
+              <p class="font-display text-3xl sm:text-4xl font-bold stat-count" data-target={totalClicks}>0</p>
+              <p class="mt-1 text-xs sm:text-sm text-text-secondary uppercase tracking-wider">Total Klik</p>
+            </div>
+            <div class="h-12 w-px bg-border hidden sm:block"></div>
+            <div class="text-center">
+              <p class="font-display text-3xl sm:text-4xl font-bold stat-count" data-target={allLabels.length}>0</p>
+              <p class="mt-1 text-xs sm:text-sm text-text-secondary uppercase tracking-wider">Label</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sticky Search + Filter -->
+      <div id="sticky-bar" class="sticky top-16 z-30 mx-auto max-w-7xl px-5 sm:px-8 -mt-4 pb-2">
+        <div class="glass rounded-2xl px-3 py-2.5 shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+              </svg>
+              <input
+                type="text"
+                id="sticky-search"
+                placeholder="Cari produk..."
+                class="input-base !py-2 !pl-9 !pr-9 !rounded-xl !text-sm"
+                autocomplete="off"
+              />
+              <button
+                type="button"
+                id="sticky-clear"
+                aria-label="Hapus pencarian"
+                class="absolute right-2 top-1/2 -translate-y-1/2 hidden h-5 w-5 items-center justify-center rounded-full bg-white/10 text-text-secondary hover:bg-white/20 hover:text-text-primary transition-colors"
+              >
+                <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <span id="sticky-count" class="shrink-0 text-xs text-text-secondary hidden sm:block"></span>
+          </div>
+          <div class="flex gap-2 mt-2.5 overflow-x-auto no-scrollbar pb-0.5" role="group" aria-label="Filter label">
+            <button class="chip !px-3 !py-1.5 !text-xs chip-active" data-label="all">Semua</button>
+            {allLabels.map((label) => (
+              <button class="chip !px-3 !py-1.5 !text-xs shrink-0" data-label={label}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <!-- Empty State -->
-      <div 
-        id="empty-state" 
-        class="hidden text-center py-16"
-      >
-        <svg class="mx-auto h-12 w-12 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <h3 class="mt-4 text-lg font-medium">Tidak ada produk ditemukan</h3>
-        <p class="mt-1 text-text-secondary">Coba ubah pencarian atau filter kategori.</p>
+      <!-- Catalog -->
+      <section id="catalog" class="mx-auto max-w-7xl px-5 sm:px-8 pt-6">
+        <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+          <div>
+            <h2 class="font-display text-2xl sm:text-3xl font-bold">Katalog Produk</h2>
+            <p class="mt-1 text-sm text-text-secondary">
+              <span id="filtered-count" class="text-accent font-semibold">{products.length}</span> produk ditampilkan
+            </p>
+          </div>
+        </div>
+
+        <!-- Product Grid -->
+        <div id="product-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {labeledProducts.map((product, index) => (
+            <article
+              class="card card-hover group flex flex-col"
+              data-labels={JSON.stringify(product.labels)}
+              data-name={product.name.toLowerCase()}
+              style={`--reveal-delay:${(index % 4) * 70}ms`}
+            >
+              {product.image_url && (
+                <div class="relative aspect-video overflow-hidden">
+                  <img
+                    src={product.image_url}
+                    alt={product.name}
+                    class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    loading="lazy"
+                  />
+                  {product.labels.length > 0 && (
+                    <div class="absolute top-3 left-3 flex flex-wrap gap-1.5 max-w-[85%]">
+                      {product.labels.slice(0, 2).map((label) => (
+                        <span class="badge backdrop-blur-md !bg-black/50 !border-white/10 !text-white/90">{label}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div class="absolute inset-0 bg-gradient-to-t from-bg-card/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                </div>
+              )}
+              <div class="p-5 flex flex-col flex-1 gap-3">
+                <h3 class="font-display font-bold text-base leading-snug line-clamp-2 group-hover:text-accent transition-colors">
+                  {product.name}
+                </h3>
+                <p class="text-text-secondary text-sm leading-relaxed line-clamp-2 flex-1">
+                  {product.description || 'Tidak ada deskripsi.'}
+                </p>
+                {product.labels.slice(2).length > 0 && (
+                  <div class="flex flex-wrap gap-1.5">
+                    {product.labels.slice(2).map((label) => (
+                      <span class="badge !py-0.5 !text-[10px]">{label}</span>
+                    ))}
+                  </div>
+                )}
+                <div class="flex items-center justify-between pt-4 mt-auto border-t border-border">
+                  <span class="inline-flex items-center gap-1.5 text-xs text-text-secondary">
+                    <svg class="h-3.5 w-3.5 text-gold" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    {product.click_count} klik
+                  </span>
+                  <a
+                    href={`/go/${product.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="btn-primary !px-4 !py-2 !text-xs"
+                  >
+                    Lihat Produk
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6v6m-9 3l9-9" />
+                    </svg>
+                  </a>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="hidden text-center py-24">
+          <div class="mx-auto h-16 w-16 grid place-items-center rounded-2xl bg-white/5 border border-border">
+            <svg class="h-8 w-8 text-text-secondary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0zM8 11h6" />
+            </svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold">Tidak ada produk ditemukan</h3>
+          <p class="mt-1 text-text-secondary">Coba ubah pencarian atau filter label.</p>
+          <button id="reset-filter" class="btn-ghost mt-6 !text-sm">Reset Filter</button>
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section id="how" class="mx-auto max-w-7xl px-5 sm:px-8 mt-24">
+        <div class="text-center mb-12">
+          <span class="badge !text-accent !border-accent/40 !bg-accent/10 mb-4">Gimana cara kerjanya?</span>
+          <h2 class="font-display text-2xl sm:text-3xl font-bold">3 Langkah Menuju Cuan</h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="card card-hover p-8 text-center reveal">
+            <div class="mx-auto mb-5 h-14 w-14 grid place-items-center rounded-2xl bg-gradient-to-br from-accent to-accent-2 shadow-[0_0_24px_rgba(99,102,241,0.35)]">
+              <span class="font-display text-xl font-bold text-white">1</span>
+            </div>
+            <h3 class="font-display font-bold text-lg mb-2">Pilih Produk</h3>
+            <p class="text-sm text-text-secondary leading-relaxed">
+              Jelajahi katalog dan pilih produk digital yang paling sesuai kebutuhanmu.
+            </p>
+          </div>
+          <div class="card card-hover p-8 text-center reveal" style="--reveal-delay:120ms">
+            <div class="mx-auto mb-5 h-14 w-14 grid place-items-center rounded-2xl bg-gradient-to-br from-accent-2 to-gold shadow-[0_0_24px_rgba(139,92,246,0.35)]">
+              <span class="font-display text-xl font-bold text-white">2</span>
+            </div>
+            <h3 class="font-display font-bold text-lg mb-2">Klik &amp; Bandingkan</h3>
+            <p class="text-sm text-text-secondary leading-relaxed">
+              Lihat detail produk di halaman tujuan dan pastikan itu yang kamu cari.
+            </p>
+          </div>
+          <div class="card card-hover p-8 text-center reveal" style="--reveal-delay:240ms">
+            <div class="mx-auto mb-5 h-14 w-14 grid place-items-center rounded-2xl bg-gradient-to-br from-gold to-amber-500 shadow-[0_0_24px_rgba(240,182,92,0.35)]">
+              <span class="font-display text-xl font-bold text-white">3</span>
+            </div>
+            <h3 class="font-display font-bold text-lg mb-2">Dapatkan Cuan</h3>
+            <p class="text-sm text-text-secondary leading-relaxed">
+              Lakukan pembelian dan mulailah membangun. Simple, cepat, tanpa ribet.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-border/60 mt-20">
+      <div class="mx-auto max-w-7xl px-5 sm:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-2.5">
+          <span class="grid place-items-center h-7 w-7 rounded-lg bg-gradient-to-br from-accent to-accent-2">
+            <svg class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M21 7v4h-4" />
+            </svg>
+          </span>
+          <span class="text-sm font-medium text-text-secondary">
+            © 2026 Cuan.ninja · Kurasi produk digital terpilih
+          </span>
+        </div>
+        <div class="flex items-center gap-4 text-sm text-text-secondary">
+          <a href="/#catalog" class="hover:text-text-primary transition-colors">Katalog</a>
+          <a href="/#how" class="hover:text-text-primary transition-colors">Cara Kerja</a>
+        </div>
       </div>
-    </div>
-  </main>
+    </footer>
+  </div>
+</Layout>
 
-  <!-- Client-side filtering script -->
-  <script is:inline>
-    const searchInput = document.getElementById('search-input');
-    const filterButtons = document.querySelectorAll('.filter-btn');
-    const productCards = document.querySelectorAll('[data-category]');
-    const grid = document.getElementById('product-grid');
-    const emptyState = document.getElementById('empty-state');
-    const filteredCount = document.getElementById('filtered-count');
+<script>
+  const stickySearch = document.getElementById('sticky-search');
+  const stickyClear = document.getElementById('sticky-clear');
+  const stickyCount = document.getElementById('sticky-count');
+  const filterButtons = document.querySelectorAll('.chip[data-label]');
+  const productCards = document.querySelectorAll('[data-labels][data-name]');
+  const grid = document.getElementById('product-grid');
+  const emptyState = document.getElementById('empty-state');
+  const filteredCount = document.getElementById('filtered-count');
+  const resetBtn = document.getElementById('reset-filter');
 
-    let activeCategory = 'all';
-    let searchQuery = '';
+  let activeLabel = 'all';
+  let searchQuery = '';
 
-    function filterProducts() {
-      let visibleCount = 0;
-      
-      productCards.forEach(card => {
-        const name = card.dataset.name || '';
-        const category = card.dataset.category || '';
-        
-        const matchesSearch = name.includes(searchQuery);
-        const matchesCategory = activeCategory === 'all' || category === activeCategory;
-        
-        if (matchesSearch && matchesCategory) {
-          card.classList.remove('hidden');
-          visibleCount++;
-        } else {
-          card.classList.add('hidden');
-        }
-      });
-      
-      filteredCount.textContent = visibleCount;
-      
-      if (visibleCount === 0) {
-        grid.classList.add('hidden');
-        emptyState.classList.remove('hidden');
+  function setActiveLabel(label) {
+    filterButtons.forEach((btn) => {
+      const isActive = (btn.dataset.label || 'all') === label;
+      btn.classList.toggle('chip-active', isActive);
+    });
+  }
+
+  function cardHasLabel(card, label) {
+    const raw = card.dataset.labels;
+    if (!raw) return false;
+    try {
+      return JSON.parse(raw).includes(label);
+    } catch {
+      return false;
+    }
+  }
+
+  function setSearchValue(value) {
+    const text = value.toLowerCase().trim();
+    searchQuery = text;
+    stickySearch.value = value;
+    const hasText = text.length > 0;
+    stickyClear.classList.toggle('hidden', !hasText);
+    filterProducts();
+  }
+
+  function filterProducts() {
+    let visibleCount = 0;
+
+    productCards.forEach((card) => {
+      const name = card.dataset.name || '';
+
+      const matchesSearch = name.includes(searchQuery);
+      const matchesLabel = activeLabel === 'all' || cardHasLabel(card, activeLabel);
+
+      if (matchesSearch && matchesLabel) {
+        card.classList.remove('hidden');
+        visibleCount++;
       } else {
-        grid.classList.remove('hidden');
-        emptyState.classList.add('hidden');
+        card.classList.add('hidden');
       }
+    });
+
+    filteredCount.textContent = visibleCount;
+    if (stickyCount) {
+      stickyCount.textContent = visibleCount + ' produk';
     }
 
-    searchInput.addEventListener('input', (e) => {
-      searchQuery = e.target.value.toLowerCase().trim();
+    if (visibleCount === 0) {
+      grid.classList.add('hidden');
+      emptyState.classList.remove('hidden');
+    } else {
+      grid.classList.remove('hidden');
+      emptyState.classList.add('hidden');
+    }
+  }
+
+  let debounceTimer;
+  function onSearchInput(value) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      setSearchValue(value);
+    }, 120);
+  }
+
+  stickySearch.addEventListener('input', (e) => {
+    onSearchInput(e.target.value);
+  });
+
+  stickyClear.addEventListener('click', () => {
+    setSearchValue('');
+    stickySearch.focus();
+  });
+
+  filterButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activeLabel = btn.dataset.label || 'all';
+      setActiveLabel(activeLabel);
       filterProducts();
     });
+  });
 
-    filterButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        filterButtons.forEach(b => b.classList.remove('bg-accent/20', 'text-accent', 'border-accent/50'));
-        btn.classList.add('bg-accent/20', 'text-accent', 'border-accent/50');
-        activeCategory = btn.dataset.category || 'all';
-        filterProducts();
-      });
-    });
-
-    // Initialize
+  resetBtn.addEventListener('click', () => {
+    activeLabel = 'all';
+    setSearchValue('');
+    setActiveLabel('all');
     filterProducts();
-  </script>
-</Layout>
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== stickySearch) {
+      e.preventDefault();
+      stickySearch.focus();
+    }
+  });
+
+  const revealEls = document.querySelectorAll('.reveal:not(.is-visible)');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+    revealEls.forEach((el) => io.observe(el));
+  } else {
+    revealEls.forEach((el) => el.classList.add('is-visible'));
+  }
+
+  const statEls = document.querySelectorAll('.stat-count');
+  statEls.forEach((el) => {
+    const target = parseInt(el.dataset.target || '0', 10);
+    if (!target) {
+      el.textContent = '0';
+      return;
+    }
+    const dur = 1200;
+    const start = performance.now();
+    function tick(now) {
+      const p = Math.min((now - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(target * eased).toLocaleString('id-ID');
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+
+  filterProducts();
+</script>

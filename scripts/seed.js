@@ -1,5 +1,9 @@
-// Seed sample products into D1
-import { createDatabase } from './src/lib/db.js';
+// Seed sample products into cuan.ninja D1.
+// Source of truth: scripts/seed.sql (run with wrangler).
+// This script generates the same INSERT statement and prints it to stdout so it
+// can be piped directly into wrangler, e.g.:
+//
+//   node scripts/seed.js | npx wrangler d1 execute cuan-db --remote
 
 const sampleProducts = [
   {
@@ -48,23 +52,22 @@ const sampleProducts = [
     description: '50+ template email transaksional & marketing responsif. Kompatibel React Email, MJML, dan plain HTML. Termasuk dark mode.',
     affiliate_url: 'https://example.com/affiliate/react-email',
     image_url: 'https://images.unsplash.com/photo-1586717791821-3f44a563fa4c?w=800',
-    category: 'Developer Tools'
+    category: '["Developer Tools","Email","Marketing"]'
   }
 ];
 
-async function seed() {
-  // We need to simulate the D1 binding for local execution
-  // This will be run via wrangler locally
-  console.log('Seeding products...');
-  
-  // This is a reference script - actual execution needs wrangler
-  for (const product of sampleProducts) {
-    console.log(`Would insert: ${product.name} (${product.slug})`);
-  }
-  
-  console.log('\nTo actually seed, run:');
-  console.log('npx wrangler d1 execute cuan-db --local --command="..."');
-  console.log('Or create a Worker script to do this programmatically.');
+function q(value) {
+  if (value === null || value === undefined) return 'NULL';
+  return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-seed();
+const rows = sampleProducts
+  .map((p, i) => {
+    const id = `550e8400-e29b-41d4-a716-44665544000${i + 1}`;
+    return `  (${q(id)}, ${q(p.slug)}, ${q(p.name)}, ${q(p.description)}, ${q(p.affiliate_url)}, ${q(p.image_url)}, ${q(p.category)})`;
+  })
+  .join(',\n');
+
+const sql = `INSERT OR IGNORE INTO products (id, slug, name, description, affiliate_url, image_url, category) VALUES\n${rows};\n`;
+
+console.log(sql);

@@ -1,5 +1,3 @@
-import type { App } from 'astro';
-
 interface Product {
   id: string;
   slug: string;
@@ -18,16 +16,6 @@ interface ClickData {
   referrer: string | null;
   user_agent: string | null;
   country: string | null;
-}
-
-declare module 'astro' {
-  interface Locals {
-    runtime: App<{
-      env: {
-        cuan_db: D1Database;
-      };
-    }>['runtime']['env'];
-  }
 }
 
 export class Database {

@@ -1,43 +1,95 @@
-# Astro Starter Kit: Minimal
+# Cuan.ninja
 
-```sh
-npm create astro@latest -- --template minimal
-```
+Katalog affiliate digital berteknologi Cloudflare. Menampilkan kurasi produk digital (template, boilerplate, course, tools) dengan mekanisme redirect ter-tracking.
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+- **Frontend**: Astro (SSR) + Tailwind CSS v4
+- **Deploy**: Cloudflare Workers / Pages (`@astrojs/cloudflare`), `output: 'server'`
+- **Database**: Cloudflare D1 (tabel `products` + `clicks`, trigger penghitung klik)
 
-## 🚀 Project Structure
+## Fitur
 
-Inside of your Astro project, you'll see the following folders and files:
+- Halaman katalog dark-theme: hero + statistik, sticky search, filter multi-label
+- Redirect engine: `/go/{slug}` → lookup produk → catat klik → `302` ke `affiliate_url`
+- Produk mendukung banyak label (contoh `["Developer Tools","Email","Marketing"]`)
+- SEO meta (OG/Twitter/canonical), favicon brand, aksesibel (reduced-motion, keyboard `/`)
+
+## Struktur
 
 ```text
 /
 ├── public/
+│   └── favicon.svg
+├── scripts/
+│   ├── seed.sql           # seed sample (jalankan via wrangler)
+│   └── seed.js            # generator SQL yang sama, untuk pipa ke wrangler
 ├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
+│   ├── layouts/Layout.astro
+│   ├── lib/db.ts          # akses data D1 (produk, klik, kategori)
+│   ├── pages/
+│   │   ├── index.astro    # katalog utama
+│   │   └── go/[slug].js   # redirect + tracking klik
+│   └── styles/global.css  # tema Tailwind v4
+├── schema.sql             # skema D1 (products, clicks, trigger)
+├── astro.config.mjs
+└── wrangler.toml          # binding D1 `cuan_db`
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+## Menjalankan Lokal
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+```sh
+# Install dependencies
+npm install
 
-Any static assets, like images, can be placed in the `public/` directory.
+# Set up database lokal (wrangler --local)
+npx wrangler d1 create cuan-db --local
+npx wrangler d1 execute cuan-db --local --file=schema.sql
+npx wrangler d1 execute cuan-db --local --file=scripts/seed.sql
 
-## 🧞 Commands
+# Jalankan dev server (rekomendasi: background mode)
+npx wrangler dev --local
+```
 
-All commands are run from the root of the project, from a terminal:
+## Build
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+```sh
+npm run build
+```
 
-## 👀 Want to learn more?
+Output ada di `dist/`. Karena `output: 'server'`, halaman dirender oleh Worker saat runtime (butuh binding D1).
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+## Deploy ke Cloudflare
+
+Prasyarat: login wrangler (`npx wrangler login`) atau `CLOUDFLARE_API_TOKEN`.
+
+```sh
+# Buat database D1 di remote
+npx wrangler d1 create cuan-db
+# Isi database_id di wrangler.toml dengan nilai dari output
+
+# Seed data remote
+npx wrangler d1 execute cuan-db --remote --file=schema.sql
+npx wrangler d1 execute cuan-db --remote --file=scripts/seed.sql
+
+# Deploy worker
+npx wrangler deploy
+```
+
+Setelah deploy, hubungkan custom domain (mis. `cuan.ninja`) di dashboard Cloudflare → Workers Routes atau Pages Custom Domains.
+
+## Data Model
+
+`products`:
+
+| kolom          | tipe      | catatan |
+|----------------|-----------|---------|
+| `id`           | TEXT (PK) | UUID    |
+| `slug`         | TEXT (UNIQUE) | dipakai `/go/{slug}` |
+| `name`         | TEXT      |         |
+| `description`  | TEXT      |         |
+| `affiliate_url`| TEXT      | tujuan redirect |
+| `image_url`    | TEXT      |         |
+| `category`     | TEXT      | 1 label atau JSON array label |
+| `click_count`  | INTEGER   | di-increment trigger |
+| `created_at` / `updated_at` | DATETIME | |
+
+`clicks`: satu baris per klik (product_slug, referrer, user_agent, country, clicked_at). Trigger `increment_click_count` menaikkan `products.click_count` otomatis.
